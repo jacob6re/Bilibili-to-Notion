@@ -1,12 +1,12 @@
 import os
-import feedparser
 import requests
+import hashlib
+import time
+import urllib.parse
 
-# ⚠️ 将你的 B 站 UID 放在这里
-BILIBILI_UIDS = [
-    {"name": "Xuan酱", "uid": "14848367"},
-    # {"name": "你的博主名2", "uid": "654321"},
-]
+# Xuan酱 UID
+BILIBILI_UID = "14848367"
+UP_NAME = "Xuan酱"
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DATABASE_ID = os.environ["DATABASE_ID"]
@@ -17,11 +17,69 @@ headers = {
     "Content-Type": "application/json"
 }
 
+# -------------------------
+# WBI 签名算法（官方逆向）
+# -------------------------
+
+def get_wbi_mixin_key(img_url, sub_url):
+    mixin = img_url.split('/')[-1].split('.')[0] + sub_url.split('/')[-1].split('.')[0]
+    table = "f2lup9mdqc6jkvwt7s8neb4ga5yhrx13"
+    return "".join([mixin[int(i)] for i in range(32)])
+
+
+def get_wbi_params(params):
+    # 获取 wbi key
+    nav = requests.get("https://api.bilibili.com/x/web-interface/nav").json()
+    img_url = nav["data"]["wbi_img"]["img_url"]
+    sub_url = nav["data"]["wbi_img"]["sub_url"]
+    mixin_key = get_wbi_mixin_key(img_url, sub_url)
+
+    params = dict(sorted(params.items()))
+    query = urllib.parse.urlencode(params)
+    to_sign = query + mixin_key
+    sign = hashlib.md5(to_sign.encode()).hexdigest()
+
+    params["wts"] = int(time.time())
+    params["w_rid"] = sign
+    return params
+
+
+# -------------------------
+# 调用 B 站官方 API 获取视频
+# -------------------------
+
+def fetch_bilibili_videos(uid):
+    api = "https://api.bilibili.com/x/space/wbi/arc/search"
+
+    base_params = {
+        "mid": uid,
+        "ps": 30,
+        "pn": 1,
+        "order": "pubdate",
+        "index": 1
+    }
+
+    params = get_wbi_params(base_params)
+
+    resp = requests.get(api, params=params).json()
+
+    if resp["code"] != 0:
+        print("API error:", resp)
+        return []
+
+    vlist = resp["data"]["list"]["vlist"]
+    return vlist
+
+
+# -------------------------
+# 写入 Notion
+# -------------------------
+
 def send_to_notion(title, url, published, author, thumbnail):
     data = {
         "parent": {"database_id": DATABASE_ID},
 
-        # 设置页面封面（Notion Gallery 会显示）
+        # 页面封面，让 Notion Gallery 显示大图
         "cover": {
             "type": "external",
             "external": {"url": thumbnail}
@@ -38,30 +96,28 @@ def send_to_notion(title, url, published, author, thumbnail):
     r = requests.post("https://api.notion.com/v1/pages", json=data, headers=headers)
     print("Notion status:", r.status_code, r.text)
 
-def fetch_bilibili(uid, author):
-    rss = f"https://rsshub.app/bilibili/user/video/{uid}"
-    print(f"\nFetching RSS for {author}: {rss}")
-    feed = feedparser.parse(rss)
 
-    print(f"Found {len(feed.entries)} items for {author}")
-
-    for entry in feed.entries[:3]:  # 最新 3 条
-        title = entry.title
-        link = entry.link
-        published = entry.published
-
-        # 封面解析
-        try:
-            thumbnail = entry.media_thumbnail[0]["url"]
-        except:
-            thumbnail = None
-
-        print("Sending:", title, link, published, thumbnail)
-        send_to_notion(title, link, published, author, thumbnail)
+# -------------------------
+# 主流程
+# -------------------------
 
 def main():
-    for item in BILIBILI_UIDS:
-        fetch_bilibili(item["uid"], item["name"])
+    print("Fetching videos for Xuan酱 ...")
+
+    videos = fetch_bilibili_videos(BILIBILI_UID)
+
+    print("Total videos found:", len(videos))
+
+    for v in videos[:3]:  # 取最新三条
+        title = v["title"]
+        bvid = v["bvid"]
+        url = f"https://www.bilibili.com/video/{bvid}"
+        published = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(v["created"]))
+        thumbnail = v["pic"]
+
+        print("Sending:", title, url, published, thumbnail)
+        send_to_notion(title, url, published, UP_NAME, thumbnail)
+
 
 if __name__ == "__main__":
     main()
