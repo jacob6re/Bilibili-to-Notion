@@ -1,0 +1,28 @@
+name: Bilibili to Notion
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: pip install feedparser requests
+
+    - name: Run main.py
+      env:
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        DATABASE_ID: ${{ secrets.DATABASE_ID }}
+      run: python main.py
