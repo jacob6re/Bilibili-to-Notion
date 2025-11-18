@@ -4,7 +4,7 @@ import requests
 
 # ⚠️ 将你的 B 站 UID 放在这里
 BILIBILI_UIDS = [
-    {"name": "你的博主名1", "uid": "123456"},
+    {"name": "Xuan酱", "uid": "14848367"},
     # {"name": "你的博主名2", "uid": "654321"},
 ]
 
